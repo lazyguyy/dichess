@@ -3,13 +3,18 @@ import discord
 
 class Basic_bot:
     def __init__(self):
-        print(f"[{self.name}]: is ready")
+        self.log(f"is ready")
 
     def create_background_tasks(self):
         pass
 
     def initiate_shutdown(self):
-        print(f"[{self.name}]: preparing for shutdown")
+        self.log(f"preparing for shutdown")
+
+
+    def log(self, *args):
+        print(f"[{self.name}]: ", end="")
+        print(*args)
 
 
     # define the bots behaviour on specific commands

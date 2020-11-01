@@ -5,6 +5,8 @@ import sys
 import random
 import os
 
+from tournament_bot import Tournament_bot
+
 class Dichess(discord.Client):
 
     def __init__(self, subsystems):
@@ -12,17 +14,22 @@ class Dichess(discord.Client):
         self.tasks = 0
         self.name = "dichess"
 
-        print(f"[{self.name}]: booting subystems")
+        self.log(f"booting subystems")
         self.subsystems = [subsystem(self) for subsystem in subsystems]
 
         for subsystem in self.subsystems:
             subsystem.create_background_tasks()
 
-        print(f"[{self.name}]: all subsystems have been booted")
+        self.log(f"all subsystems have been booted")
+
+    def log(self, *args):
+        print(f"[{self.name}]: ", end="")
+        print(*args)
+
 
     async def on_ready(self):
-        await client.change_presence(activity=discord.Game(name="bb help"))
-        print(f"[{self.name}]: has been started")
+        await client.change_presence(activity=discord.Game(name="dichess is there for you"))
+        self.log(f"has been started")
 
     async def on_message(self, message):
         if message.author == client.user:
@@ -38,22 +45,21 @@ class Dichess(discord.Client):
         if not message.content.startswith(self.name):
             return
 
-        content = message.content[3:]
+        content = message.content[8:]
         action = content.split()[0]
 
         if action == "stop":
-            print(f"[{self.name}]: shutting down")
-            await message.delete()
+            self.log(f"shutting down")
 
             # make sure each subsystem closes all its background tasks before we halt the bot
             for subsystem in self.subsystems:
                 subsystem.initiate_shutdown()
 
-            print(f"[{self.name}]: waiting for all tasks to finish")
+            self.log(f"waiting for all tasks to finish")
             while self.tasks > 0:
-                print(f"[{self.name}]: {self.tasks} task(s) remaining")
+                self.log(f"{self.tasks} task(s) remaining")
                 await asyncio.sleep(5)
-            print(f"[{self.name}]: all tasks have been closed. good bye")
+            self.log(f"all tasks have been closed. good bye")
             await self.logout()
             await self.close()
 
@@ -70,6 +76,6 @@ with open(os.path.join(sys.path[0], "token"), "r") as f:
 
 
 
-client = Dichess([])
+client = Dichess([Tournament_bot])
 
 client.run(TOKEN)
