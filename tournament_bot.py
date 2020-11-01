@@ -2,17 +2,34 @@ import discord
 import sqlite3
 
 from basic_bot import Basic_bot
+from collections import defaultdict
 
 
 class Tournament():
-    def __init__(self, tournament_id, message_id):
+    def __init__(self, t_id, name, m_id, status):
+        self.name = name
         # the id of the tournament. there might be multiple tournaments running at the same time (only one can be active and the id will be used to switch between active tournaments)
-        self.tournament_name = tournament_name
+        self.t_id = t_id
         # the id of the message where player reactions and the tournament standings will be shared
-        self.message_id = message_id
+        self.m_id = m_id
+        self.status = status
+        # only tournament type thats currently supported
+        self.type = "round robin"
 
-tournament_creation_message = """To play in this tournament, simply register your lichess username with
-``dichess register <username>`` first . Then, react with the :brain: emoji.
+    def start(self, players):
+        self.players = players
+        if len(self.players) % 2 != 0:
+            self.players.append(None)
+        self.rounds = len(players) - 1
+        self.results = [[] * len(players)]
+
+    # generates the round robin pairing for the specified round
+    def rr_pairing(rnd):
+        players = self.players[rnd:]
+
+
+tournament_creation_message = """React with  :brain:  to participate in this tournament.
+Link your lichess and discord account with ``dichess link <username>``. 
 Start the tournament with ``dichess start {}``."""
 
 class Tournament_bot(Basic_bot):
@@ -22,16 +39,32 @@ class Tournament_bot(Basic_bot):
         self.database = sqlite3.connect('tournament.db')
         self.cursor = self.database.cursor()
 
-        previous_id = self.cursor.execute("SELECT max(id) from tournaments").fetchone()[0]
-        self.current_tournament_id = 0 if previous_id == None else previous_id[0] + 1
+        previous_id = self.database.execute("SELECT max(id) from tournaments").fetchone()[0]
+        self.current_t_id = 0 if previous_id == None else previous_id[0] + 1
 
         # read from file
-        self.active_channels_per_server = {}
+        self.active_channels_per_server = defaultdict(set)
         self.discord_to_lichess = {}
         self.tournaments = {}
 
-
         super().__init__()
+
+
+    def read_from_database(self):
+        # read active channels
+        for server, channel in self.database.execute("SELECT * FROM active_channels GROUP BY server"):
+            self.active_channels_per_server[server].add(channel)
+
+        # read discord / lichess aliases
+        for d_name, l_name in self.database.execute("SELECT * FROM players"):
+            self.discord_to_lichess[d_name] = l_name
+
+        # read tournaments
+
+        # not yet started
+        for t_id, name, m_id, status in self.database.execute("SELECT * FROM tournaments WHERE status=created"):
+            tournament = Tournament(t_id, name, m_id, status)
+            tournaments[t_id] = tournament
 
 
     def initiate_shutdown(self):
@@ -44,10 +77,9 @@ class Tournament_bot(Basic_bot):
         guild = message.channel.guild.id
         if words[0] == "init":
 
-            self.active_channels_per_server[guild] = set(words[1:])
-            self.cursor.executemany("INSERT INTO active_channels VALUES (?,?)", [(guild, channel) for channel in words[1:]])
+            self.active_channels_per_server[guild].add(message.channel.id)
+            self.database.execute("INSERT INTO active_channels VALUES (?,?)", (guild, message.channel.id))
             self.database.commit()
-            print(self.active_channels_per_server)
             return
 
         # if a command is received in a channel the bot is not allowed to talk in
@@ -57,28 +89,33 @@ class Tournament_bot(Basic_bot):
         # if guild not in self.active_channels_per_server.keys() or message.channel.name not in self.active_channels_per_server[guild]:
         #     return
 
-        # register a new user. We need to know which lichess username belongs to that discord user 
+        # link a new user. We need to know which lichess username belongs to that discord user 
         # so we can ping and scrape results accordingly
-        if words[0] == "register":
+        if words[0] == "link":
             lichess = words[1]
+            if (message.author.id in self.discord_to_lichess.keys()):
+                self.database.execute("UPDATE players SET lichess_name=? WHERE discord_id=?", (lichess, message.author.id))
+            else:   
+                self.database.execute("INSERT INTO players VALUES (?,?)", (message.author.id, lichess))
             self.discord_to_lichess[message.author.id] = lichess
-            self.cursor.execute("INSERT INTO players VALUES (?,?)", (message.author.name, lichess))
             self.database.commit()
-            print(f"registered {message.author.name} as {lichess}")
+            print(f"linked {message.author.name} and {lichess}")
             return
 
         if words[0] == "create":
             name = content[7:]
             if name.strip() == "":
-                name = tournament_id
-            message_content = tournament_creation_message.format(self.current_tournament_id)
+                name = "Chess tournament #" + (self.current_t_id + 1)
+
+            message_content = tournament_creation_message.format(self.current_t_id)
             embed = discord.Embed(
-                title=f"Chess tournament",
+                title=name,
                 type="rich",
                 description=message_content,
                 colour=discord.Colour.dark_teal())
             print("Creating a new tournament.")
             tournament_message = await message.channel.send(embed=embed)
-            self.cursor.execute("INSERT INTO tournaments VALUES (?,?,?)", (self.current_tournament_id, name, tournament_message.id))
+            tournament = Tournament(self.current_t_id, name, tournament_message.id, "created")
+            self.database.execute("INSERT INTO tournaments VALUES (?,?,?,?,?)", (self.current_t_id, name, tournament_message.id, "created", "round robin"))
             self.database.commit()
-            self.current_tournament_id += 1
+            self.current_t_id += 1
